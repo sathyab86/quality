@@ -2,32 +2,23 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 from googlesearch import search
-import spacy
 import nltk
 from textblob import TextBlob
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objs as go
 
-# Download NLTK resources
+# Attempt to download NLTK resources
 try:
     nltk.download('punkt', quiet=True)
     nltk.download('wordnet', quiet=True)
-except:
-    st.warning("Could not download NLTK resources automatically")
+except Exception as e:
+    st.warning(f"Could not download NLTK resources: {e}")
 
 class QualityBenchmarkingAgent:
     def __init__(self):
         """
         Initialize the Quality Benchmarking Agent
         """
-        # Load SpaCy model
-        try:
-            self.nlp = spacy.load('en_core_web_sm')
-        except OSError:
-            st.error("SpaCy model not found. Please download 'en_core_web_sm'.")
-            self.nlp = None
-
         # Define capabilities and industries
         self.capabilities = [
             'QMS (Quality Management System)',
@@ -85,7 +76,7 @@ class QualityBenchmarkingAgent:
             # Extract text
             text = soup.get_text()
             
-            # NLP Analysis
+            # Basic text analysis
             analysis = self.analyze_text(text)
             
             return {
@@ -102,55 +93,23 @@ class QualityBenchmarkingAgent:
 
     def analyze_text(self, text):
         """
-        Perform NLP analysis on text
+        Perform basic text analysis
         
         Args:
             text (str): Text to analyze
         
         Returns:
-            Dict: NLP analysis results
+            Dict: Text analysis results
         """
-        if not self.nlp:
-            return {}
-
-        # Perform NLP analysis
-        doc = self.nlp(text)
-        
         # Sentiment Analysis
         blob = TextBlob(text)
         
         return {
             'sentiment': blob.sentiment.polarity,
             'subjectivity': blob.sentiment.subjectivity,
-            'entities': [
-                {'text': ent.text, 'label': ent.label_} 
-                for ent in doc.ents
-            ],
             'word_count': len(text.split()),
-            'key_phrases': self.extract_key_phrases(doc)
+            'sentences': len(nltk.sent_tokenize(text))
         }
-
-    def extract_key_phrases(self, doc, top_n=5):
-        """
-        Extract key phrases from document
-        
-        Args:
-            doc (spacy.tokens.Doc): Processed document
-            top_n (int): Number of top phrases to return
-        
-        Returns:
-            List[str]: Top key phrases
-        """
-        # Extract noun chunks as potential key phrases
-        phrases = [chunk.text for chunk in doc.noun_chunks]
-        
-        # Remove duplicates while preserving order
-        unique_phrases = []
-        for phrase in phrases:
-            if phrase not in unique_phrases:
-                unique_phrases.append(phrase)
-        
-        return unique_phrases[:top_n]
 
 def main():
     """
@@ -203,12 +162,12 @@ def main():
         for url in search_results:
             content = agent.extract_content(url)
             
-            if content:
+            if content and content['analysis']:
                 research_data.append({
                     'url': content['url'],
                     'sentiment': content['analysis'].get('sentiment', 0),
                     'word_count': content['analysis'].get('word_count', 0),
-                    'key_phrases': ', '.join(content['analysis'].get('key_phrases', []))
+                    'sentences': content['analysis'].get('sentences', 0)
                 })
         
         # Create DataFrame
@@ -234,7 +193,7 @@ def main():
                     df_results, 
                     x='word_count', 
                     y='sentiment', 
-                    hover_data=['url', 'key_phrases'],
+                    hover_data=['url'],
                     title='Word Count vs Sentiment',
                     labels={'word_count': 'Document Length', 'sentiment': 'Sentiment Score'}
                 )
@@ -251,8 +210,8 @@ def main():
     st.sidebar.info("""
     Automated Quality Benchmarking Tool
     - Advanced web research
-    - NLP-powered insights
-    - Comprehensive industry analysis
+    - Basic text analysis
+    - Comprehensive industry insights
     """)
 
 if __name__ == '__main__':
