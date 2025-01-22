@@ -1,31 +1,41 @@
 # Core Python Libraries
-numpy==1.22.4
-pandas==1.5.3
+numpy>=1.23.5,<2.0
+pandas>=2.0.0,<3.0
+python-dateutil>=2.8.2
 
 # Web Scraping and HTTP Requests
-requests==2.28.2
-beautifulsoup4==4.11.2
+requests>=2.31.0
+beautifulsoup4>=4.12.3
+lxml>=5.2.0  # Improved HTML/XML parsing
 
 # Streamlit for Web Application
-streamlit==1.20.0
+streamlit>=1.32.0
 
-# Optional: For advanced data processing and ML (future enhancements)
-scikit-learn==1.2.2
-scipy==1.10.1
+# Data Processing and Analysis
+scikit-learn>=1.3.0
+scipy>=1.11.0
+openpyxl>=3.1.0  # Excel file support
 
-# Optional: For additional data visualization
-matplotlib==3.7.1
-seaborn==0.12.2
+# Visualization
+matplotlib>=3.7.5
+plotly>=5.22.0
+seaborn>=0.13.0
 
-# For potential future web scraping and data collection improvements
-selenium==4.8.3
-webdriver-manager==3.8.5
+# Web Scraping Enhancements
+selenium>=4.20.0
+webdriver-manager>=4.0.1
 
-# Environment and development
-python-dotenv==1.0.0
+# Environment and Logging
+python-dotenv>=1.0.0
+loguru>=0.7.2
 
-# Logging and monitoring
-logging==0.5.1.2
+# Type Hinting and Utilities
+typing-extensions>=4.10.0
 
-# Type hinting support
-typing-extensions==4.5.0
+# Database
+sqlalchemy>=2.0.0
+sqlite3  # Built-in with Python standard library
+
+# Additional Utilities
+setuptools>=69.2.0
+wheel>=0.43.0
