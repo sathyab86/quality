@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
-from googlesearch import search
+import urllib.parse
 import nltk
 from textblob import TextBlob
 import pandas as pd
@@ -43,7 +43,7 @@ class QualityBenchmarkingAgent:
 
     def web_search(self, query, num_results=5):
         """
-        Perform web search and return URLs
+        Perform web search using Google Search API
         
         Args:
             query (str): Search query
@@ -53,7 +53,31 @@ class QualityBenchmarkingAgent:
             List[str]: List of search result URLs
         """
         try:
-            return list(search(query, num_results=num_results))
+            # Encode the query for URL
+            encoded_query = urllib.parse.quote(query)
+            
+            # Use Google Search URL
+            search_url = f"https://www.google.com/search?q={encoded_query}"
+            
+            # Headers to mimic browser request
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            
+            # Perform the search request
+            response = requests.get(search_url, headers=headers)
+            
+            # Parse the HTML
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Extract search result links
+            results = []
+            for link in soup.find_all('div', class_='yuRUbf'):
+                a_tag = link.find('a')
+                if a_tag and len(results) < num_results:
+                    results.append(a_tag['href'])
+            
+            return results
         except Exception as e:
             st.error(f"Web search error: {e}")
             return []
@@ -70,11 +94,20 @@ class QualityBenchmarkingAgent:
         """
         try:
             # Fetch webpage content
-            response = requests.get(url, timeout=10)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            response = requests.get(url, headers=headers, timeout=10)
+            
+            # Parse HTML
             soup = BeautifulSoup(response.text, 'html.parser')
             
+            # Remove script and style elements
+            for script in soup(["script", "style"]):
+                script.decompose()
+            
             # Extract text
-            text = soup.get_text()
+            text = soup.get_text(separator=' ', strip=True)
             
             # Basic text analysis
             analysis = self.analyze_text(text)
@@ -104,12 +137,16 @@ class QualityBenchmarkingAgent:
         # Sentiment Analysis
         blob = TextBlob(text)
         
-        return {
-            'sentiment': blob.sentiment.polarity,
-            'subjectivity': blob.sentiment.subjectivity,
-            'word_count': len(text.split()),
-            'sentences': len(nltk.sent_tokenize(text))
-        }
+        try:
+            return {
+                'sentiment': blob.sentiment.polarity,
+                'subjectivity': blob.sentiment.subjectivity,
+                'word_count': len(text.split()),
+                'sentences': len(nltk.sent_tokenize(text))
+            }
+        except Exception as e:
+            st.warning(f"Text analysis error: {e}")
+            return {}
 
 def main():
     """
@@ -156,10 +193,22 @@ def main():
         # Perform search
         search_results = agent.web_search(search_query)
         
+        # Check if results were found
+        if not search_results:
+            st.warning("No search results found. Please try a different query or check your internet connection.")
+            st.stop()
+        
         # Analyze and display results
         research_data = []
         
-        for url in search_results:
+        # Progress bar
+        progress_bar = st.progress(0)
+        
+        for i, url in enumerate(search_results):
+            # Update progress
+            progress_bar.progress((i + 1) / len(search_results))
+            
+            # Extract content
             content = agent.extract_content(url)
             
             if content and content['analysis']:
@@ -169,6 +218,9 @@ def main():
                     'word_count': content['analysis'].get('word_count', 0),
                     'sentences': content['analysis'].get('sentences', 0)
                 })
+        
+        # Clear progress bar
+        progress_bar.empty()
         
         # Create DataFrame
         if research_data:
@@ -203,7 +255,7 @@ def main():
             st.subheader("Detailed Research Findings")
             st.dataframe(df_results)
         else:
-            st.warning("No research results found.")
+            st.warning("No analyzable content found in search results.")
     
     # About section
     st.sidebar.header("About")
