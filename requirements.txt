@@ -32,9 +32,8 @@ loguru>=0.7.2
 # Type Hinting and Utilities
 typing-extensions>=4.10.0
 
-# Database
+# Database (Note: SQLAlchemy, not sqlite3)
 sqlalchemy>=2.0.0
-sqlite3  # Built-in with Python standard library
 
 # Additional Utilities
 setuptools>=69.2.0
