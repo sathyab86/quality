@@ -3,100 +3,92 @@ import pandas as pd
 import numpy as np
 import requests
 from bs4 import BeautifulSoup
-import sqlite3
 import logging
 from typing import List, Dict, Any
 from loguru import logger
 import plotly.express as px
 import plotly.graph_objs as go
 
+# SQLAlchemy Imports
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy.exc import SQLAlchemyError
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger.add("quality_benchmark.log", rotation="500 MB")
 
+# SQLAlchemy Base and Session
+Base = declarative_base()
+
+class Company(Base):
+    """SQLAlchemy model for companies"""
+    __tablename__ = 'companies'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, unique=True, nullable=False)
+    industry = Column(String, nullable=False)
+    website = Column(String)
+    description = Column(String)
+    
+    # Relationship to quality scores
+    quality_scores = relationship("QualityScore", back_populates="company")
+
+class QualityScore(Base):
+    """SQLAlchemy model for quality scores"""
+    __tablename__ = 'quality_scores'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey('companies.id'))
+    capability = Column(String, nullable=False)
+    score = Column(Float, nullable=False)
+    year = Column(Integer, nullable=False)
+    
+    # Relationship back to company
+    company = relationship("Company", back_populates="quality_scores")
+
 class QualityBenchmarkingAgent:
-    def __init__(self, db_path='quality_benchmarking.db'):
+    def __init__(self, db_path='sqlite:///quality_benchmarking.db'):
         """
         Initialize the Quality Benchmarking Agent
         
         Args:
-            db_path (str): Path to the SQLite database
-        """
-        # Database setup
-        self.db_path = db_path
-        self.conn = self._create_connection()
-        self._create_tables()
-        
-        # Quality capabilities and industries
-        self.quality_capabilities = [
-            'QMS (Quality Management System)', 
-            'SPC (Statistical Process Control)', 
-            'Manufacturing Quality', 
-            'Quality Risk Monitoring', 
-            'Supplier Quality', 
-            'Analytics & Insights', 
-            'Culture of Quality', 
-            'Design for Manufacturing'
-        ]
-        
-        self.industries = [
-            'Automotive', 
-            'Healthcare', 
-            'Consumer Packaged Goods (CPG)', 
-            'Steel', 
-            'Oil and Gas', 
-            'Retail', 
-            'Life Sciences'
-        ]
-    
-    def _create_connection(self):
-        """
-        Create a database connection
-        
-        Returns:
-            sqlite3.Connection: Database connection
+            db_path (str): SQLAlchemy database connection string
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            logger.info(f"Connected to database: {self.db_path}")
-            return conn
-        except sqlite3.Error as e:
-            logger.error(f"Error connecting to database: {e}")
+            # Create engine and create tables
+            self.engine = create_engine(db_path)
+            Base.metadata.create_all(self.engine)
+            
+            # Create session factory
+            self.SessionLocal = sessionmaker(bind=self.engine)
+            
+            # Quality capabilities and industries
+            self.quality_capabilities = [
+                'QMS (Quality Management System)', 
+                'SPC (Statistical Process Control)', 
+                'Manufacturing Quality', 
+                'Quality Risk Monitoring', 
+                'Supplier Quality', 
+                'Analytics & Insights', 
+                'Culture of Quality', 
+                'Design for Manufacturing'
+            ]
+            
+            self.industries = [
+                'Automotive', 
+                'Healthcare', 
+                'Consumer Packaged Goods (CPG)', 
+                'Steel', 
+                'Oil and Gas', 
+                'Retail', 
+                'Life Sciences'
+            ]
+            
+            logger.info("Database initialized successfully")
+        except SQLAlchemyError as e:
+            logger.error(f"Error initializing database: {e}")
             raise
-    
-    def _create_tables(self):
-        """Create necessary database tables"""
-        try:
-            cursor = self.conn.cursor()
-            
-            # Companies table
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS companies (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE,
-                industry TEXT,
-                website TEXT,
-                description TEXT
-            )
-            ''')
-            
-            # Quality scores table
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS quality_scores (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                company_id INTEGER,
-                capability TEXT,
-                score REAL,
-                year INTEGER,
-                FOREIGN KEY(company_id) REFERENCES companies(id)
-            )
-            ''')
-            
-            self.conn.commit()
-            logger.info("Database tables created successfully")
-        except sqlite3.Error as e:
-            logger.error(f"Error creating tables: {e}")
-            self.conn.rollback()
     
     def web_scrape_companies(self, industry: str) -> List[Dict[str, str]]:
         """
@@ -146,20 +138,29 @@ class QualityBenchmarkingAgent:
             companies (List[Dict[str, str]]): List of companies to save
             industry (str): Industry of the companies
         """
+        session = self.SessionLocal()
         try:
-            cursor = self.conn.cursor()
+            for company_data in companies:
+                # Check if company already exists
+                existing_company = session.query(Company).filter_by(name=company_data['name']).first()
+                
+                if not existing_company:
+                    # Create new company
+                    new_company = Company(
+                        name=company_data['name'],
+                        industry=industry,
+                        website=company_data.get('website', ''),
+                        description=company_data.get('description', '')
+                    )
+                    session.add(new_company)
             
-            for company in companies:
-                cursor.execute('''
-                INSERT OR REPLACE INTO companies (name, industry, website, description) 
-                VALUES (?, ?, ?, ?)
-                ''', (company['name'], industry, company['website'], company.get('description', '')))
-            
-            self.conn.commit()
+            session.commit()
             logger.info(f"Saved {len(companies)} companies to database")
-        except sqlite3.Error as e:
+        except SQLAlchemyError as e:
+            session.rollback()
             logger.error(f"Error saving companies: {e}")
-            self.conn.rollback()
+        finally:
+            session.close()
     
     def generate_quality_score(self) -> float:
         """
@@ -181,35 +182,37 @@ class QualityBenchmarkingAgent:
             company_name (str): Name of the company
             industry (str): Industry of the company
         """
+        session = self.SessionLocal()
         try:
-            cursor = self.conn.cursor()
+            # Find the company
+            company = session.query(Company).filter_by(name=company_name, industry=industry).first()
             
-            # Get company ID
-            cursor.execute('SELECT id FROM companies WHERE name = ? AND industry = ?', (company_name, industry))
-            company_record = cursor.fetchone()
-            
-            if not company_record:
+            if not company:
                 logger.warning(f"Company {company_name} not found in database")
                 return None
             
-            company_id = company_record[0]
             current_year = pd.Timestamp.now().year
             
             # Generate and save scores for each capability
             for capability in self.quality_capabilities:
                 score = self.generate_quality_score()
                 
-                cursor.execute('''
-                INSERT OR REPLACE INTO quality_scores 
-                (company_id, capability, score, year)
-                VALUES (?, ?, ?, ?)
-                ''', (company_id, capability, score, current_year))
+                # Create new quality score
+                quality_score = QualityScore(
+                    company_id=company.id,
+                    capability=capability,
+                    score=score,
+                    year=current_year
+                )
+                session.add(quality_score)
             
-            self.conn.commit()
+            session.commit()
             logger.info(f"Scored capabilities for {company_name}")
-        except sqlite3.Error as e:
+        except SQLAlchemyError as e:
+            session.rollback()
             logger.error(f"Error scoring company capabilities: {e}")
-            self.conn.rollback()
+        finally:
+            session.close()
     
     def get_company_scores(self, company_name: str, industry: str) -> List[Dict[str, Any]]:
         """
@@ -222,31 +225,33 @@ class QualityBenchmarkingAgent:
         Returns:
             List[Dict[str, Any]]: List of company scores
         """
+        session = self.SessionLocal()
         try:
-            cursor = self.conn.cursor()
+            # Find the company and its scores
+            company = session.query(Company).filter_by(name=company_name, industry=industry).first()
             
-            cursor.execute('''
-            SELECT c.name, c.industry, qs.capability, qs.score, qs.year
-            FROM companies c
-            JOIN quality_scores qs ON c.id = qs.company_id
-            WHERE c.name = ? AND c.industry = ?
-            ''', (company_name, industry))
+            if not company:
+                logger.warning(f"Company {company_name} not found")
+                return []
             
+            # Convert SQLAlchemy objects to dictionaries
             scores = [
                 {
-                    'name': row[0], 
-                    'industry': row[1], 
-                    'capability': row[2], 
-                    'score': row[3],
-                    'year': row[4]
+                    'name': company.name, 
+                    'industry': company.industry, 
+                    'capability': score.capability, 
+                    'score': score.score,
+                    'year': score.year
                 } 
-                for row in cursor.fetchall()
+                for score in company.quality_scores
             ]
             
             return scores
-        except sqlite3.Error as e:
+        except SQLAlchemyError as e:
             logger.error(f"Error retrieving company scores: {e}")
             return []
+        finally:
+            session.close()
 
 def create_capability_chart(scores: List[Dict[str, Any]]) -> go.Figure:
     """
@@ -325,13 +330,15 @@ def main():
                 st.error(f"Error discovering companies: {e}")
         
         # Company Selection
-        cursor = agent.conn.cursor()
-        cursor.execute('SELECT name FROM companies WHERE industry = ?', (selected_industry,))
-        companies = [row[0] for row in cursor.fetchall()]
+        session = agent.SessionLocal()
+        companies = session.query(Company).filter_by(industry=selected_industry).all()
+        session.close()
+        
+        company_names = [company.name for company in companies]
         
         selected_company = st.selectbox(
             'Select Company', 
-            companies if companies else ['No companies found']
+            company_names if company_names else ['No companies found']
         )
         
         # Score Company Button
