@@ -1,13 +1,12 @@
 import streamlit as st
+import os
 import requests
-from bs4 import BeautifulSoup
-import urllib.parse
 import nltk
 from textblob import TextBlob
 import pandas as pd
 import plotly.express as px
 
-# Attempt to download NLTK resources
+# Download NLTK resources
 try:
     nltk.download('punkt', quiet=True)
     nltk.download('wordnet', quiet=True)
@@ -43,86 +42,63 @@ class QualityBenchmarkingAgent:
 
     def web_search(self, query, num_results=5):
         """
-        Perform web search using Google Search API
+        Perform web search using SerpAPI
         
         Args:
             query (str): Search query
             num_results (int): Number of search results
         
         Returns:
-            List[str]: List of search result URLs
+            List[Dict]: List of search results
         """
+        # Get API key from environment variable or Streamlit secrets
+        api_key = st.secrets.get('SERPAPI_KEY') if hasattr(st.secrets, 'get') else os.getenv('SERPAPI_KEY')
+        
+        if not api_key:
+            st.error("""
+            SerpAPI key is required for web search. 
+            Please set up your API key:
+            1. Sign up at https://serpapi.com
+            2. Add key to environment variables or Streamlit secrets
+            3. Set SERPAPI_KEY=your_api_key
+            """)
+            return []
+
+        # Construct search parameters
+        params = {
+            'engine': 'google',
+            'q': query,
+            'api_key': api_key,
+            'num': num_results
+        }
+
         try:
-            # Encode the query for URL
-            encoded_query = urllib.parse.quote(query)
+            # Perform search request
+            response = requests.get('https://serpapi.com/search', params=params)
             
-            # Use Google Search URL
-            search_url = f"https://www.google.com/search?q={encoded_query}"
+            # Check if request was successful
+            if response.status_code != 200:
+                st.error(f"Search API error: {response.status_code}")
+                return []
+
+            # Parse search results
+            data = response.json()
             
-            # Headers to mimic browser request
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
+            # Extract organic results
+            organic_results = data.get('organic_results', [])
             
-            # Perform the search request
-            response = requests.get(search_url, headers=headers)
-            
-            # Parse the HTML
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Extract search result links
-            results = []
-            for link in soup.find_all('div', class_='yuRUbf'):
-                a_tag = link.find('a')
-                if a_tag and len(results) < num_results:
-                    results.append(a_tag['href'])
-            
-            return results
+            return [
+                {
+                    'title': result.get('title', ''),
+                    'link': result.get('link', ''),
+                    'snippet': result.get('snippet', '')
+                }
+                for result in organic_results
+            ]
+
         except Exception as e:
             st.error(f"Web search error: {e}")
             return []
-
-    def extract_content(self, url):
-        """
-        Extract text content from a URL
-        
-        Args:
-            url (str): URL to extract content from
-        
-        Returns:
-            Dict: Extracted content details
-        """
-        try:
-            # Fetch webpage content
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-            response = requests.get(url, headers=headers, timeout=10)
-            
-            # Parse HTML
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Remove script and style elements
-            for script in soup(["script", "style"]):
-                script.decompose()
-            
-            # Extract text
-            text = soup.get_text(separator=' ', strip=True)
-            
-            # Basic text analysis
-            analysis = self.analyze_text(text)
-            
-            return {
-                'url': url,
-                'text': text[:1000],  # Limit text length
-                'analysis': analysis
-            }
-        except Exception as e:
-            return {
-                'url': url,
-                'text': f"Error extracting content: {e}",
-                'analysis': {}
-            }
 
     def analyze_text(self, text):
         """
@@ -182,8 +158,20 @@ def main():
             agent.capabilities
         )
     
+    # API Key Input
+    st.sidebar.header("Search Configuration")
+    serpapi_key = st.sidebar.text_input(
+        "SerpAPI Key", 
+        type="password", 
+        help="Get your free API key at serpapi.com"
+    )
+
     # Search button
     if st.button("Perform Research"):
+        # Store API key if provided
+        if serpapi_key:
+            os.environ['SERPAPI_KEY'] = serpapi_key
+        
         # Construct search query
         search_query = f"{selected_industry} {selected_capability} best practices"
         
@@ -195,75 +183,57 @@ def main():
         
         # Check if results were found
         if not search_results:
-            st.warning("No search results found. Please try a different query or check your internet connection.")
+            st.warning("No search results found. Please check your API key and internet connection.")
             st.stop()
         
-        # Analyze and display results
-        research_data = []
-        
-        # Progress bar
-        progress_bar = st.progress(0)
-        
-        for i, url in enumerate(search_results):
-            # Update progress
-            progress_bar.progress((i + 1) / len(search_results))
-            
-            # Extract content
-            content = agent.extract_content(url)
-            
-            if content and content['analysis']:
-                research_data.append({
-                    'url': content['url'],
-                    'sentiment': content['analysis'].get('sentiment', 0),
-                    'word_count': content['analysis'].get('word_count', 0),
-                    'sentences': content['analysis'].get('sentences', 0)
-                })
-        
-        # Clear progress bar
-        progress_bar.empty()
-        
         # Create DataFrame
-        if research_data:
-            df_results = pd.DataFrame(research_data)
+        df_results = pd.DataFrame(search_results)
+        
+        # Display search results
+        st.subheader("Search Findings")
+        
+        # Display results in an expandable format
+        for _, result in df_results.iterrows():
+            with st.expander(result['title']):
+                st.write(f"**URL:** {result['link']}")
+                st.write(f"**Snippet:** {result['snippet']}")
+                
+                # Optional: Basic text analysis (if more text is available)
+                analysis = agent.analyze_text(result['snippet'])
+                if analysis:
+                    st.write("**Analysis:**")
+                    st.json(analysis)
+        
+        # Additional insights
+        st.subheader("Insights Summary")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Sentiment distribution of snippets
+            sentiment_scores = [agent.analyze_text(snippet)['sentiment'] 
+                                for snippet in df_results['snippet']]
             
-            # Visualization
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Sentiment Distribution
-                fig_sentiment = px.histogram(
-                    df_results, 
-                    x='sentiment', 
-                    title='Sentiment Distribution',
-                    labels={'sentiment': 'Sentiment Score'}
-                )
-                st.plotly_chart(fig_sentiment)
-            
-            with col2:
-                # Word Count vs Sentiment Scatter
-                fig_scatter = px.scatter(
-                    df_results, 
-                    x='word_count', 
-                    y='sentiment', 
-                    hover_data=['url'],
-                    title='Word Count vs Sentiment',
-                    labels={'word_count': 'Document Length', 'sentiment': 'Sentiment Score'}
-                )
-                st.plotly_chart(fig_scatter)
-            
-            # Detailed Results Table
-            st.subheader("Detailed Research Findings")
-            st.dataframe(df_results)
-        else:
-            st.warning("No analyzable content found in search results.")
+            # Sentiment Distribution
+            fig_sentiment = px.histogram(
+                x=sentiment_scores, 
+                title='Sentiment Distribution',
+                labels={'x': 'Sentiment Score'}
+            )
+            st.plotly_chart(fig_sentiment)
+        
+        with col2:
+            # Display some basic statistics
+            st.metric("Total Results", len(df_results))
+            avg_sentiment = pd.Series(sentiment_scores).mean()
+            st.metric("Average Sentiment", f"{avg_sentiment:.2f}")
     
     # About section
     st.sidebar.header("About")
     st.sidebar.info("""
     Automated Quality Benchmarking Tool
-    - Advanced web research
-    - Basic text analysis
-    - Comprehensive industry insights
+    - Powered by SerpAPI
+    - Industry-specific insights
+    - Advanced search capabilities
     """)
 
 if __name__ == '__main__':
