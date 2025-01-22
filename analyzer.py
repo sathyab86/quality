@@ -2,16 +2,32 @@ import streamlit as st
 import os
 import requests
 import nltk
+from nltk.tokenize import sent_tokenize
 from textblob import TextBlob
 import pandas as pd
 import plotly.express as px
 
-# Download NLTK resources
-try:
-    nltk.download('punkt', quiet=True)
-    nltk.download('wordnet', quiet=True)
-except Exception as e:
-    st.warning(f"Could not download NLTK resources: {e}")
+# Comprehensive NLTK Resource Download Function
+def download_nltk_resources():
+    """
+    Download necessary NLTK resources with error handling
+    """
+    # List of resources to download
+    resources = [
+        'punkt',
+        'wordnet',
+        'averaged_perceptron_tagger',
+    ]
+    
+    for resource in resources:
+        try:
+            # Attempt to download the resource
+            nltk.download(resource, quiet=True)
+        except Exception as e:
+            st.warning(f"Could not download NLTK resource {resource}: {e}")
+
+# Attempt to download resources
+download_nltk_resources()
 
 class QualityBenchmarkingAgent:
     def __init__(self):
@@ -110,15 +126,25 @@ class QualityBenchmarkingAgent:
         Returns:
             Dict: Text analysis results
         """
-        # Sentiment Analysis
-        blob = TextBlob(text)
-        
         try:
+            # Ensure text is a string
+            text = str(text)
+            
+            # Sentiment Analysis
+            blob = TextBlob(text)
+            
+            # Sentence tokenization with fallback
+            try:
+                sentences = sent_tokenize(text)
+            except Exception:
+                # Fallback to simple splitting if tokenization fails
+                sentences = text.split('.')
+            
             return {
                 'sentiment': blob.sentiment.polarity,
                 'subjectivity': blob.sentiment.subjectivity,
                 'word_count': len(text.split()),
-                'sentences': len(nltk.sent_tokenize(text))
+                'sentences': len(sentences)
             }
         except Exception as e:
             st.warning(f"Text analysis error: {e}")
@@ -198,7 +224,7 @@ def main():
                 st.write(f"**URL:** {result['link']}")
                 st.write(f"**Snippet:** {result['snippet']}")
                 
-                # Optional: Basic text analysis (if more text is available)
+                # Optional: Basic text analysis
                 analysis = agent.analyze_text(result['snippet'])
                 if analysis:
                     st.write("**Analysis:**")
@@ -235,6 +261,18 @@ def main():
     - Industry-specific insights
     - Advanced search capabilities
     """)
+
+    # NLTK Resource Check
+    st.sidebar.header("NLTK Resources")
+    try:
+        # Check punkt resource
+        nltk.data.find('tokenizers/punkt')
+        st.sidebar.success("NLTK Punkt Tokenizer ✅")
+    except LookupError:
+        st.sidebar.warning("NLTK Punkt Tokenizer ⚠️")
+        if st.sidebar.button("Download NLTK Resources"):
+            download_nltk_resources()
+            st.experimental_rerun()
 
 if __name__ == '__main__':
     main()
